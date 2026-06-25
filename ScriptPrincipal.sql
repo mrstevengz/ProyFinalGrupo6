@@ -725,3 +725,28 @@ GO
 SELECT * FROM msdb.dbo.sysmail_event_log
 ORDER BY log_date DESC;
 GO
+
+EXEC sp_update_jobstep 
+    @job_name = 'TiendaUam_AlertaBajoStock', 
+    @step_id = 1, 
+    @command = N'
+	DECLARE @cuenta INT;
+	SELECT @cuenta = COUNT(*) FROM TiendaUamDB.dbo.vw_ProductosBajoStock;
+
+	IF @cuenta > 0
+	BEGIN 
+		DECLARE @cuerpo NVARCHAR(MAX);
+		SELECT @cuerpo = 
+			STRING_AGG(
+				CONCAT(Producto, '' ('', Categoria, '') - Stock: '', Stock),
+				CHAR(13) + CHAR(10)
+			)
+		FROM TiendaUamDB.dbo.vw_ProductosBajoStock;
+		
+		EXEC msdb.dbo.sp_send_dbmail
+			@profile_name = ''PerfilTiendaUam'',
+			@recipients = ''ggpaiz@uamv.edu.ni'', -- Actualizado para tu presentacion
+			@subject = ''ALERTA: Productos con stock critico'',
+			@body = @cuerpo;
+	END';
+GO
