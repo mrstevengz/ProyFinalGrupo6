@@ -1,8 +1,6 @@
 /* ==========================================================================
    TiendaUamDB - Script base (creacion de BD, tablas e inserciones)
    Universidad Americana (UAM)
-   Proposito: base de datos funcional sobre la cual se implementaran las
-   estrategias de administracion, seguridad, monitoreo y automatizacion.
    ========================================================================== */
 
 USE master;

@@ -1,7 +1,124 @@
 USE TiendaUamDB
 GO
 
+--SECCION DIEDEREICH
+
+/* 5.1 Actualización de estadísticas */
+EXEC sp_updatestats;
+GO
+
+/* Consulta de verificación: estadísticas actualizadas */
+SELECT 
+    OBJECT_NAME(s.object_id) AS Tabla,
+    s.name AS Estadistica,
+    STATS_DATE(s.object_id, s.stats_id) AS FechaUltimaActualizacion
+FROM sys.stats s
+WHERE OBJECT_NAME(s.object_id) IN ('Categorias', 'Ciudades', 'Cliente', 'Empleados', 'Producto', 'Ventas', 'DetalleVentas')
+ORDER BY Tabla, Estadistica;
+GO
+
+/* 5.2 Reorganización de índices */
+ALTER INDEX ALL ON Categorias REORGANIZE;
+ALTER INDEX ALL ON Ciudades REORGANIZE;
+ALTER INDEX ALL ON Cliente REORGANIZE;
+ALTER INDEX ALL ON Empleados REORGANIZE;
+ALTER INDEX ALL ON Producto REORGANIZE;
+ALTER INDEX ALL ON Ventas REORGANIZE;
+ALTER INDEX ALL ON DetalleVentas REORGANIZE;
+GO
+
+/* Consulta de verificación: fragmentación de índices */
+SELECT 
+    OBJECT_NAME(ips.object_id) AS Tabla,
+    i.name AS Indice,
+    ips.index_type_desc AS TipoIndice,
+    ips.avg_fragmentation_in_percent AS FragmentacionPorcentaje
+FROM sys.dm_db_index_physical_stats(DB_ID('TiendaUamDB'), NULL, NULL, NULL, 'LIMITED') ips
+INNER JOIN sys.indexes i ON ips.object_id = i.object_id AND ips.index_id = i.index_id
+WHERE OBJECT_NAME(ips.object_id) IN ('Categorias', 'Ciudades', 'Cliente', 'Empleados', 'Producto', 'Ventas', 'DetalleVentas')
+ORDER BY FragmentacionPorcentaje DESC;
+GO
+
+/* 5.3 Verificación de integridad de la base de datos */
+DBCC CHECKDB('TiendaUamDB');
+GO
+
+/* ==========================================================================
+   6. EXTENDED EVENTS (MONITOREO DE ERRORES)
+   ========================================================================== */
+
+USE master;
+GO
+
+/* Eliminar la sesión si ya existe para evitar errores */
+IF EXISTS (SELECT * FROM sys.server_event_sessions WHERE name = 'XE_TiendaUam_Errores')
+    DROP EVENT SESSION XE_TiendaUam_Errores ON SERVER;
+GO
+
+/* Crear sesión para capturar errores de T-SQL en TiendaUamDB */
+CREATE EVENT SESSION XE_TiendaUam_Errores ON SERVER 
+ADD EVENT sqlserver.error_reported
+(
+    ACTION 
+    (
+        sqlserver.sql_text,
+        sqlserver.username,
+        sqlserver.client_hostname,
+        sqlserver.database_name
+    )
+    /* Filtramos únicamente los errores que ocurran dentro de nuestra BD */
+    WHERE (sqlserver.database_name = N'TiendaUamDB')
+)
+ADD TARGET package0.ring_buffer;
+GO
+
+/* Iniciar la sesión */
+ALTER EVENT SESSION XE_TiendaUam_Errores ON SERVER STATE = START;
+GO
+
+/* Prueba para generar un error capturable en TiendaUamDB */
+USE TiendaUamDB;
+GO
+
+BEGIN TRY
+    -- Intentamos insertar un cliente violando la restricción UNIQUE de Cédula
+    INSERT INTO Cliente (Nombres, Apellidos, Cedula, CiudadID) 
+    VALUES ('Prueba', 'Error', '001-150201-1000A', 1);
+END TRY
+BEGIN CATCH
+    PRINT 'Error forzado capturado por Extended Events.';
+END CATCH;
+GO
+
+/* Consulta de verificación: Leer eventos capturados desde el ring_buffer */
+WITH Eventos AS
+(
+    SELECT CAST(t.target_data AS XML) AS TargetData
+    FROM sys.dm_xe_session_targets t
+    INNER JOIN sys.dm_xe_sessions s ON t.event_session_address = s.address
+    WHERE s.name = 'XE_TiendaUam_Errores' AND t.target_name = 'ring_buffer'
+)
+SELECT 
+    Evento.value('@name', 'VARCHAR(100)') AS NombreEvento,
+    Evento.value('(data[@name="error_number"]/value)[1]', 'INT') AS NumeroError,
+    Evento.value('(data[@name="message"]/value)[1]', 'NVARCHAR(MAX)') AS MensajeError,
+    Evento.value('(action[@name="database_name"]/value)[1]', 'SYSNAME') AS BaseDeDatos,
+    Evento.value('(action[@name="username"]/value)[1]', 'SYSNAME') AS Usuario,
+    Evento.value('(action[@name="sql_text"]/value)[1]', 'NVARCHAR(MAX)') AS ConsultaSQL
+FROM Eventos
+CROSS APPLY TargetData.nodes('//RingBufferTarget/event') AS X(Evento)
+ORDER BY NumeroError DESC;
+GO
+
+--FINAL SECCION DIEDEREICH
+
+
+--Seccion Steven
+
 -- VISTAS DE LA EMPRESA
+
+USE TiendaUamDB;
+GO
 
 CREATE VIEW dbo.vw_VentasDetalladas
 AS
@@ -367,6 +484,82 @@ EXEC msdb.dbo.sp_add_jobserver
 	@job_name= 'TiendaUam_AlertaBajoStock'
 GO
 
+--JOB 3
+
+USE msdb;
+GO
+
+IF EXISTS (SELECT * FROM msdb.dbo.sysjobs WHERE name = 'TiendaUam_Mantenimiento_TiendaUam')
+BEGIN
+    EXEC msdb.dbo.sp_delete_job @job_name = 'TiendaUam_Mantenimiento_TiendaUam';
+END;
+GO
+
+/* Crear Job */
+EXEC msdb.dbo.sp_add_job 
+    @job_name = 'TiendaUam_Mantenimiento_TiendaUam',
+    @enabled = 1,
+    @description = 'Job para ejecutar mantenimiento automático diario de la base de datos TiendaUamDB.';
+GO
+
+/* Paso 1: Actualizar estadísticas */
+EXEC msdb.dbo.sp_add_jobstep 
+    @job_name = 'TiendaUam_Mantenimiento_TiendaUam',
+    @step_name = 'Actualizar estadísticas TiendaUamDB',
+    @subsystem = 'TSQL',
+    @database_name = 'TiendaUamDB',
+    @command = 'EXEC sp_updatestats;';
+GO
+
+/* Paso 2: Reorganizar índices */
+EXEC msdb.dbo.sp_add_jobstep 
+    @job_name = 'TiendaUam_Mantenimiento_TiendaUam',
+    @step_name = 'Reorganizar índices TiendaUamDB',
+    @subsystem = 'TSQL',
+    @database_name = 'TiendaUamDB',
+    @command = '
+        ALTER INDEX ALL ON Categorias REORGANIZE;
+        ALTER INDEX ALL ON Ciudades REORGANIZE;
+        ALTER INDEX ALL ON Cliente REORGANIZE;
+        ALTER INDEX ALL ON Empleados REORGANIZE;
+        ALTER INDEX ALL ON Producto REORGANIZE;
+        ALTER INDEX ALL ON Ventas REORGANIZE;
+        ALTER INDEX ALL ON DetalleVentas REORGANIZE;
+    ';
+GO
+
+/* Paso 3: Verificar integridad */
+EXEC msdb.dbo.sp_add_jobstep 
+    @job_name = 'TiendaUam_Mantenimiento_TiendaUam',
+    @step_name = 'Verificar integridad TiendaUamDB',
+    @subsystem = 'TSQL',
+    @database_name = 'TiendaUamDB',
+    @command = 'DBCC CHECKDB(''TiendaUamDB'');';
+GO
+
+/* Crear horario diario (ej: a las 2:00 AM, horario de baja carga) */
+IF EXISTS (SELECT * FROM msdb.dbo.sysschedules WHERE name = 'Horario_Diario_TiendaUam-0200')
+BEGIN
+    EXEC msdb.dbo.sp_delete_schedule @schedule_name = 'Horario_Diario_TiendaUam';
+END;
+GO
+
+EXEC msdb.dbo.sp_add_schedule 
+    @schedule_name = 'Horario_Diario_TiendaUam-0200',
+    @freq_type = 4, -- Diario
+    @freq_interval = 1,
+    @active_start_time = 020000; -- 2:00:00 AM
+GO
+
+EXEC msdb.dbo.sp_attach_schedule 
+    @job_name = 'TiendaUam_Mantenimiento_TiendaUam',
+    @schedule_name = 'Horario_Diario_TiendaUam-0200';
+GO
+
+EXEC msdb.dbo.sp_add_jobserver 
+    @job_name = 'TiendaUam_Mantenimiento_TiendaUam';
+GO
+
 --DEMOSTRACIONES DE EVIDENCIA
 
 USE TiendaUamDB;
@@ -405,6 +598,7 @@ GO
 -- Probar JOBS manualmente (evidencia de ejecucion)
 EXEC msdb.dbo.sp_start_job @job_name = 'TiendaUam_ReporteVentasDiarias';
 EXEC msdb.dbo.sp_start_job @job_name = 'TiendaUam_AlertaBajoStock';
+EXEC msdb.dbo.sp_start_job @job_name = 'TiendaUam_Mantenimiento_TiendaUam';
 GO
 
 -- Consultar historial de ejecucion de los jobs (evidencia)
@@ -421,3 +615,6 @@ WHERE j.name LIKE 'TiendaUam_%'
 ORDER BY h.run_date DESC, h.run_time DESC;
 GO
 
+--FINAL SECCION STEVEN
+
+--FINAL SCRIPT
