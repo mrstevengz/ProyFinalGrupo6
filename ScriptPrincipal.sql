@@ -618,3 +618,110 @@ GO
 --FINAL SECCION STEVEN
 
 --FINAL SCRIPT
+
+
+
+/* ==========================================================================
+   CONFIGURACIÓN DE DATABASE MAIL - TIENDA UAM
+   Sección: Gabriela Guerrero
+   ========================================================================== */
+
+
+USE master;
+GO
+/* --------------------------------------------------------------------------
+   Paso 1: Habilitar las opciones avanzadas y el componente Database Mail
+-------------------------------------------------------------------------- */
+
+EXEC sp_configure 'show advanced options', 1;
+RECONFIGURE;
+GO
+
+EXEC sp_configure 'Database Mail XPs', 1;
+RECONFIGURE;
+GO
+
+/* --------------------------------------------------------------------------
+   Paso 2: Crear la cuenta de correo (Account)
+   Nota: Modificar el correo, display_name y credenciales según el servidor
+-------------------------------------------------------------------------- */
+
+USE msdb;
+GO
+
+IF EXISTS (SELECT * FROM msdb.dbo.sysmail_account WHERE name = 'CuentaNotificacionesUam')
+BEGIN
+	EXEC sysmail_delete_account_sp @account_name = 'CuentaNotificacionesUam';
+END
+GO
+
+EXEC sysmail_add_account_sp
+	@account_name = 'CuentaNotificacionesUam',
+	@description = 'Cuenta de correo donde se envian las notificaciondes de TiendaUamDB',
+	@email_address = 'ggpaiz@uamv.edu.ni',
+	@display_name = 'Notificaciones Tienda UAM',
+	@mailserver_name = 'smtp.gmail.com',
+	@port = 587,
+	@enable_ssl = 1,
+	@username = 'ggpaiz@uamv.edu.ni',
+	@password = 'mary pfga yltt vchl';
+GO
+
+/* --------------------------------------------------------------------------
+   Paso 3: Crear el perfil de Database Mail (Profile)
+-------------------------------------------------------------------------- */
+
+IF EXISTS (SELECT * FROM msdb.dbo.sysmail_profile WHERE name = 'PerfilTiendaUam')
+BEGIN
+	EXEC sysmail_delete_profile_sp @profile_name = 'PerfilTiendaUam';
+END
+GO
+
+EXEC sysmail_add_profile_sp
+	@profile_name = 'PerfilTiendaUam',
+	@description = 'Perfil para la base de datos TiendaUamDB';
+GO
+
+/* --------------------------------------------------------------------------
+   Paso 4: Asociar la cuenta al perfil
+-------------------------------------------------------------------------- */
+
+EXEC sysmail_add_profileaccount_sp
+	@profile_name = 'PerfilTiendaUam',
+	@account_name = 'CuentaNotificacionesUam',
+	@sequence_number = 1;
+GO
+
+/* --------------------------------------------------------------------------
+   Paso 5: Conceder permisos de uso del perfil al rol publico
+-------------------------------------------------------------------------- */
+
+EXEC sysmail_add_principalprofile_sp
+	@profile_name = 'PerfilTiendaUam',
+	@principal_name = 'public',
+	@is_default = 1;
+GO
+
+/* ==========================================================================
+   EVIDENCIAS DE FUNCIONAMIENTO (DEMOSTRACIÓN)
+   ========================================================================== */
+
+/* 1. Enviar un correo de prueba manual */
+EXEC msdb.dbo.sp_send_dbmail
+    @profile_name = 'PerfilTiendaUam',
+    @recipients = 'ggpaiz@uamv.edu.ni',
+    @subject = 'Prueba de Configuración - Tienda UAM',
+    @body = 'Este es un mensaje automático de prueba generado desde SQL Server. El componente Database Mail ha sido configurado exitosamente para el proyecto.';
+GO
+
+/* 2. Consultar el registro de correos para verificar el estado de los envíos */
+-- Mostrar los correos que salieron sin problemas
+SELECT mailitem_id, recipients, subject, send_request_date, sent_status 
+FROM msdb.dbo.sysmail_allitems
+WHERE sent_status = 'sent';
+GO
+
+-- Mostrar el registro de errores (muy util si algo falla en la presentacion)
+SELECT * FROM msdb.dbo.sysmail_event_log
+ORDER BY log_date DESC;
+GO
