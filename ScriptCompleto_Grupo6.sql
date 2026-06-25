@@ -528,7 +528,6 @@ EXEC msdb.dbo.sp_add_jobserver
     @job_name = 'TiendaUam_Mantenimiento_TiendaUam';
 GO
 
-
 -- (Las pruebas de evidencia de esta seccion se movieron a la
 --  SECCION DE PRUEBAS / VERIFICACION al final del script.)
 
@@ -536,7 +535,7 @@ GO
 
 /* ==========================================================================
    CONFIGURACIÓN DE DATABASE MAIL - TIENDA UAM
-   Inicio de la sección: Gabriela Michelle Guerero Paiz
+   Inicio de la sección: Gabriela Guerrero
    ========================================================================== */
 
 USE master;
