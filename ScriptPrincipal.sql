@@ -623,7 +623,7 @@ GO
 
 /* ==========================================================================
    CONFIGURACIÓN DE DATABASE MAIL - TIENDA UAM
-   Sección: Gabriela Guerrero
+   Inicio de la sección: Gabriela Guerrero
    ========================================================================== */
 
 
@@ -726,6 +726,8 @@ SELECT * FROM msdb.dbo.sysmail_event_log
 ORDER BY log_date DESC;
 GO
 
+--Actualizacion del JOB 2 creado anteriormente para que funcione con el Database Mail configurado
+
 EXEC sp_update_jobstep 
     @job_name = 'TiendaUam_AlertaBajoStock', 
     @step_id = 1, 
@@ -750,3 +752,7 @@ EXEC sp_update_jobstep
 			@body = @cuerpo;
 	END';
 GO
+
+/* ==========================================================================
+   Fin de la sección: Gabriela Guerrero
+   ========================================================================== */
